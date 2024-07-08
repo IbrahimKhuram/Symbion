@@ -7,9 +7,12 @@ contract DonationManager {
 
     event ProjectAdded(address indexed projectWallet, uint256 indexed projectId, uint256 goalAmount, uint256 deadline);
     event ProjectDeleted(uint256 indexed projectId);
+    event TokensFunded_Crowdfunding(address indexed donorWallet, uint256 indexed projectId, uint256 depositedAmount);
+    event TokensFunded_Fundraising(address indexed donorWallet, uint256 indexed projectId, uint256 depositedAmount);
     event WithdrawalRequested(uint256 indexed projectId, address indexed projectWallet);
     event WithdrawalApproved(uint256 indexed projectId, address indexed projectWallet);
-    event TokensFunded(address indexed account, uint256 indexed projectId, address token, uint256 amount);
+    event TokensWithdrawn(uint256 indexed projectId, address indexed projectWallet, uint withdrawnAmount);
+    
 
     struct raiseProjects {
         address projectWallet;
@@ -99,7 +102,27 @@ contract DonationManager {
         return (projectWallets, goalAmounts, deadlines, amountsRaised);
     }
 
-    //Make depositFunds function.
+    function depositFunds_Fundraising(uint256 projectId) public payable projectExists(projectId) {
+        
+        uint256 depositedAmount = msg.value;
+        require(depositedAmount > 0, "Enter an ETH value to donate");
+        raiseProjects storage project = projects[projectId];
+        project.amountRaised += depositedAmount;
+        emit TokensFunded_Fundraising(msg.sender, projectId, depositedAmount);
+    }
+
+    function depositFunds_Crowdfunding(uint256 projectId) public payable projectExists(projectId) {
+        
+        // Crowdfunding platform fee: % deducted from funding amount.
+        uint256 depositedAmount = msg.value;
+        require(depositedAmount > 0, "Enter an ETH value to donate");
+        uint256 FEE = (depositedAmount *10)/100;
+        depositedAmount = depositedAmount - FEE;
+
+        raiseProjects storage project = projects[projectId];
+        project.amountRaised += msg.value;
+        emit TokensFunded_Crowdfunding(msg.sender, projectId, depositedAmount);
+    }
 
     // Once the project owner logs in, the admin permits withdrawals to occur during the session, setting firstApproval to true.
     function permitWithdrawal(uint256 projectId) public onlyAdmin projectExists(projectId) {
@@ -121,61 +144,23 @@ contract DonationManager {
         require(project.withdrawalPermitted, "Withdrawal not permitted");
         emit WithdrawalRequested(projectId, project.projectWallet);
 
-        withdrawFunds(projectId);
+        //withdrawFunds(projectId, withdrawalAmount);
 
-        //project.amountRaised = 0; should be when withdrawed
+        //project.amountRaised = 0; Should be in withdrawal func, permissions reverted.
         //project.firstApproval = false;
         //project.withdrawalRequested = false;
     }
 
-    // Function to withdraw an amount from the amount raised fund for the project to the recipient wallet.
-    // Supports both fundraising and crowdfunding, as well as native tokens and non-native tokens (USDT).
-    function withdrawFunds(uint256 fundingType, uint256 currencyOption, address recipientWallet, uint256 projectId, uint256 amount) public payable projectExists(projectId) {
+    function withdrawFunds(uint256 projectId, uint256 withdrawalAmount) public {
 
-        // fundingType = 1 = fundraising; fundingType = 2 = crowdfunding.
-        // currencyOption = 1 = native token; currencyOption = 2 = non native token.
-        if(fundingType == 1){ //Fundraising option:
-
-            uint256 totalAmount = msg.value;
-
-            if(currencyOption == 1){
-                (bool success,) = payable(recipientWallet).call{value: totalAmount}("");
-                require(success,"Success");   
-                require(success, "Token transfer failed");
-                projects[projectId].amountRaised += totalAmount;
-            }
-            else{
-                IERC20(0xdAC17F958D2ee523a2206206994597C13D831ec7).transferFrom(msg.sender, recipientWallet, amount);
-                //projects[projectId].amountRaised += totalAmount;
-            }
-        }
-        else{ //Crowdfunding option:
-
-            //Crowdfunding platform fee: % deducted from funding amount
-            uint256 totalAmount = msg.value;
-            uint256 FEE = (totalAmount *10)/100;
-            totalAmount= totalAmount-FEE;
-
-            if(currencyOption == 1){
-                (bool success,) = payable(recipientWallet).call{value: totalAmount}("");
-                require(success,"Success");  
-                require(success, "Token transfer failed"); 
-                projects[projectId].amountRaised += totalAmount;
-            }
-            else{
-                IERC20(0xdAC17F958D2ee523a2206206994597C13D831ec7).transferFrom(msg.sender, recipientWallet, amount);
-                //projects[projectId].amountRaised += totalAmount;
-            }
-        }
-    }
-
-    function _withdrawFunds(uint256 projectId) internal {
         raiseProjects storage project = projects[projectId];
-        uint256 amountRaised = projects[projectId];
-        funds[projectId] = 0;
+        require(msg.sender == project.projectWallet, "Only the project owner wallet can request withdrawal");
+        require(project.amountRaised > 0, "No funds to withdraw");
 
-        (bool success,) = payable(project.projectWallet).call{value: amount}("");
-        require(success, "Withdrawal failed");
+        (bool success,) = payable(project.projectWallet).call{value: withdrawalAmount}("");
+        require(success, "ETH transfer failed");
+
+        projects[projectId].amountRaised = projects[projectId].amountRaised - withdrawalAmount;
+        emit TokensWithdrawn(projectId, project.projectWallet, withdrawalAmount);
     }
-
 }
