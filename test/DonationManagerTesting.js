@@ -83,12 +83,12 @@ describe("DonationManager", function () {
     it("Should allow withdrawing funds", async function () {
       const { admin, projectOwner, donor, otherAccount, donationManager} = await loadFixture(deployContractAndSetVariables);
       await donationManager.connect(projectOwner).addProject(projectOwner.address, 10, 10);
-      const depositAmount = 1;
+      const depositAmount = 7;
       await donationManager.connect(donor).depositFunds_Fundraising(0, { value: depositAmount });
-      const withdrawalAmount = 1;
-      await donationManager.connect(otherAccount).withdrawFunds(0, { value: withdrawalAmount });
+      const withdrawalAmount = 3;
+      await donationManager.connect(projectOwner).withdrawFunds(0, withdrawalAmount);
       const project = await donationManager.getProject(0);
-      expect(project.amountRaised).to.equal(0);
+      expect(project[2]).to.equal(4);
     });
   });
 
