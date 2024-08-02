@@ -1,6 +1,6 @@
 const { buildModule } = require("@nomicfoundation/hardhat-ignition/modules");
 
-module.exports = buildModule("DonationManagerDeployment", (m) => {
+module.exports = buildModule("DeployDonationManager", (m) => {
   const donationManager = m.contract("DonationManager");
 
   // Add any calls to the contract if necessary, for example:

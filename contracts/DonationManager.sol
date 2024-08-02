@@ -5,7 +5,7 @@ pragma solidity ^0.8.0;
 
 contract DonationManager {
 
-    event ProjectAdded(address indexed projectWallet, uint256 indexed projectId, uint256 goalAmount, uint256 deadline);
+    event ProjectAdded(uint256 indexed projectId, address indexed projectWallet, uint256 goalAmount, uint256 deadline);
     event ProjectDeleted(uint256 indexed projectId);
     event TokensFunded_Crowdfunding(address indexed donorWallet, uint256 indexed projectId, uint256 depositedAmount);
     event TokensFunded_Fundraising(address indexed donorWallet, uint256 indexed projectId, uint256 depositedAmount);
@@ -15,6 +15,7 @@ contract DonationManager {
     
 
     struct raiseProjects {
+        uint256 projectId;
         address projectWallet;
         uint256 goalAmount;
         uint256 deadline;
@@ -26,7 +27,7 @@ contract DonationManager {
     // Mapping of an id to the struct.
     mapping(uint256 => raiseProjects) public projects;
     // Counter for projects, always increasing.
-    uint256 public projectCounter;
+    uint256 public projectCounter = 1;
     address public admin;
     //IERC20 public token; // Initialisation for non-native token support.
 
@@ -36,7 +37,13 @@ contract DonationManager {
     }
 
     modifier projectExists(uint256 projectId) {
-        require(projectId < projectCounter, "Project does not exist");
+    require(
+        projectId < projectCounter &&
+        projects[projectId].projectId != 0 &&
+        projects[projectId].projectWallet != address(0) &&
+        projects[projectId].goalAmount != 0 &&
+        projects[projectId].deadline != 0,
+        "Project does not exist");
         _;
     }
 
@@ -44,10 +51,10 @@ contract DonationManager {
         //admin = address(0x5B38Da6a701c568545dCfcB03FcB875f56beddC4) ;
     }
 
-
     function addProject(address projectWallet, uint256 goalAmount, uint256 deadline) public {
         
         projects[projectCounter] = raiseProjects({
+            projectId: projectCounter,
             projectWallet: projectWallet,
             goalAmount: goalAmount,
             deadline: deadline,
@@ -56,7 +63,7 @@ contract DonationManager {
             withdrawalRequested: false
         });
 
-        emit ProjectAdded(projectWallet, projectCounter, goalAmount, deadline);
+        emit ProjectAdded(projectCounter, projectWallet, goalAmount, deadline);
         projectCounter++;
     }
 
@@ -71,10 +78,11 @@ contract DonationManager {
         external
         view
         projectExists(projectId)
-        returns (address, uint256, uint256, uint256)
+        returns (uint256, address, uint256, uint256, uint256)
     {
         raiseProjects memory selectedProject = projects[projectId];
         return (
+            selectedProject.projectId,
             selectedProject.projectWallet,
             selectedProject.goalAmount,
             selectedProject.amountRaised,
@@ -85,8 +93,9 @@ contract DonationManager {
     function getAllProjects()
         external
         view
-        returns (address[] memory, uint256[] memory, uint256[] memory, uint256[] memory)
+        returns (uint256[] memory, address[] memory, uint256[] memory, uint256[] memory, uint256[] memory)
     {
+        uint256[] memory projectIds = new uint256[](projectCounter);
         address[] memory projectWallets = new address[](projectCounter);
         uint256[] memory goalAmounts = new uint256[](projectCounter);
         uint256[] memory deadlines = new uint256[](projectCounter);
@@ -94,12 +103,13 @@ contract DonationManager {
 
         for (uint256 i = 0; i < projectCounter; i++) {
             raiseProjects memory project = projects[i];
+            projectIds[i] = project.projectId;
             projectWallets[i] = project.projectWallet;
             goalAmounts[i] = project.goalAmount;
             deadlines[i] = project.deadline;
             amountsRaised[i] = project.amountRaised;
         }
-        return (projectWallets, goalAmounts, deadlines, amountsRaised);
+        return (projectIds, projectWallets, goalAmounts, deadlines, amountsRaised);
     }
 
     function depositFunds_Fundraising(uint256 projectId) public payable projectExists(projectId) {
@@ -120,7 +130,7 @@ contract DonationManager {
         depositedAmount = depositedAmount - FEE;
 
         raiseProjects storage project = projects[projectId];
-        project.amountRaised += msg.value;
+        project.amountRaised += depositedAmount;
         emit TokensFunded_Crowdfunding(msg.sender, projectId, depositedAmount);
     }
 
@@ -151,7 +161,7 @@ contract DonationManager {
         //project.withdrawalRequested = false;
     }
 
-    function withdrawFunds(uint256 projectId, uint256 withdrawalAmount) public {
+    function withdrawFunds(uint256 projectId, uint256 withdrawalAmount) public projectExists(projectId) {
 
         raiseProjects storage project = projects[projectId];
         require(msg.sender == project.projectWallet, "Only the project owner wallet can request withdrawal");

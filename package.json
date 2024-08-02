@@ -1,11 +1,18 @@
 {
-  "name": "hardhat-project",
+  "name": "symbion-testing2",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Ibrahim Khuram",
+  "license": "ISC",
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-    "hardhat": "^2.22.6"
+    "hardhat": "^2.22.7"
   },
   "dependencies": {
-    "bootstrap": "^5.3.3",
-    "ethers": "^6.13.2"
+    "bootstrap": "^5.3.3"
   }
 }
