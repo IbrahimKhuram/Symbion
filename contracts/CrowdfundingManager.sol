@@ -477,4 +477,137 @@ function getAllInvestments()
         merchant.reputationPoints += points;
         emit MerchantReputationUpdated(merchantWallet, merchant.reputationPoints);
     }
+
+    // ====== Loan Model Integration ======
+
+    struct LoanOffer {
+        uint256 loanId;
+        address borrower;
+        uint256 principal;
+        uint256 profitShareRatio; // percentage to investor
+        uint256 amountFunded;
+        uint256 fundingDeadline;
+        bool active;
+        bool repaid;
+    }
+
+    struct LoanInvestment {
+        uint256 loanId;
+        address investor;
+        uint256 amount;
+        bool refunded;
+    }
+
+    uint256 public loanCounter;
+    mapping(uint256 => LoanOffer) public loanOffers;
+    mapping(uint256 => LoanInvestment[]) public loanInvestments;
+
+    event LoanOffered(uint256 indexed loanId, address indexed borrower, uint256 principal, uint256 profitShareRatio, uint256 fundingDeadline);
+    event LoanFunded(uint256 indexed loanId, address indexed investor, uint256 amount);
+    event LoanFundingClosed(uint256 indexed loanId, bool successful);
+    event LoanRepaid(uint256 indexed loanId, uint256 totalRepayment);
+    event ProfitShared(uint256 indexed loanId, uint256 profitAmount, uint256 investorAmount, uint256 borrowerAmount);
+
+    /**
+     * @dev Borrower offers an interest-free loan plan with profit-sharing
+     * @param principal Amount of capital sought
+     * @param profitShareRatio Percentage of realized profit that goes to investor (max 100)
+     * @param fundingDeadline UNIX timestamp after which funding is closed
+     */
+    function offerLoan(uint256 principal, uint256 profitShareRatio, uint256 fundingDeadline) external {
+        require(principal > 0, "Principal must be > 0");
+        require(profitShareRatio > 0 && profitShareRatio <= 100, "Ratio 1-100");
+        require(fundingDeadline > block.timestamp, "Deadline in future");
+
+        loanCounter++;
+        loanOffers[loanCounter] = LoanOffer({
+            loanId: loanCounter,
+            borrower: msg.sender,
+            principal: principal,
+            profitShareRatio: profitShareRatio,
+            amountFunded: 0,
+            fundingDeadline: fundingDeadline,
+            active: true,
+            repaid: false
+        });
+
+        emit LoanOffered(loanCounter, msg.sender, principal, profitShareRatio, fundingDeadline);
+    }
+
+    /**
+     * @dev Investor funds an active loan offer
+     */
+    function fundLoan(uint256 loanId) external payable {
+        LoanOffer storage offer = loanOffers[loanId];
+        require(offer.active, "Loan not active");
+        require(block.timestamp <= offer.fundingDeadline, "Funding closed");
+        require(msg.value > 0, "Must send ETH");
+        
+        offer.amountFunded += msg.value;
+        loanInvestments[loanId].push(LoanInvestment({
+            loanId: loanId,
+            investor: msg.sender,
+            amount: msg.value,
+            refunded: false
+        }));
+
+        emit LoanFunded(loanId, msg.sender, msg.value);
+    }
+
+    /**
+     * @dev Close the funding round: if target met, transfer principal to borrower; else refund investors
+     */
+    function closeLoanFunding(uint256 loanId) external {
+        LoanOffer storage offer = loanOffers[loanId];
+        require(offer.active, "Already closed");
+        require(block.timestamp > offer.fundingDeadline, "Funding still open");
+
+        offer.active = false;
+        if (offer.amountFunded >= offer.principal) {
+            // Successful: transfer principal
+            payable(offer.borrower).transfer(offer.amountFunded);
+            emit LoanFundingClosed(loanId, true);
+        } else {
+            // Failed: refund all
+            for (uint256 i = 0; i < loanInvestments[loanId].length; i++) {
+                LoanInvestment storage inv = loanInvestments[loanId][i];
+                if (!inv.refunded) {
+                    payable(inv.investor).transfer(inv.amount);
+                    inv.refunded = true;
+                }
+            }
+            emit LoanFundingClosed(loanId, false);
+        }
+    }
+
+    /**
+     * @dev Borrower repays loan with profit, triggering profit share distribution
+     * @param loanId ID of the loan offer
+     */
+    function repayLoan(uint256 loanId) external payable {
+        LoanOffer storage offer = loanOffers[loanId];
+        require(!offer.active, "Funding still active");
+        require(!offer.repaid, "Already repaid");
+        require(msg.sender == offer.borrower, "Only borrower");
+        require(msg.value >= offer.amountFunded, "Must repay at least principal");
+
+        offer.repaid = true;
+        uint256 totalRepaid = msg.value;
+        uint256 profit = totalRepaid - offer.amountFunded;
+        uint256 investorProfitPool = (profit * offer.profitShareRatio) / 100;
+        uint256 borrowerProfit = profit - investorProfitPool;
+
+        // Distribute profit share to investors proportionally
+        for (uint256 i = 0; i < loanInvestments[loanId].length; i++) {
+            LoanInvestment storage inv = loanInvestments[loanId][i];
+            uint256 share = (investorProfitPool * inv.amount) / offer.amountFunded;
+            payable(inv.investor).transfer(inv.amount + share);
+        }
+
+        // Any remaining profit share or rounding goes to borrower
+        payable(offer.borrower).transfer(borrowerProfit);
+
+        emit ProfitShared(loanId, profit, investorProfitPool, borrowerProfit);
+        emit LoanRepaid(loanId, totalRepaid);
+    }
 }
